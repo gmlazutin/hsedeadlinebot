@@ -19,7 +19,7 @@ async def init_db():
                             )''')
         await db.commit()
 
-#таблица tasks:
+#Таблица tasks:
 #id - уникальный id задачи
 #user_id - айди пользователя, который создал задачу (telegram id)
 #task_text - непосредственно сама задача

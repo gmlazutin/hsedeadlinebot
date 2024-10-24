@@ -4,6 +4,9 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from datetime import datetime, timedelta
+
+from aiogram.fsm.state import StatesGroup, State
+
 from db import init_db, db_session
 from messages import priority_gen
 
@@ -16,7 +19,6 @@ async def view_tasks(message: types.Message):
     async with db_session() as db:
         async with db.execute('SELECT id, task_text, deadline, category, priority FROM tasks WHERE user_id = ? ORDER BY deadline', (message.from_user.id,)) as cursor:
             tasks = await cursor.fetchall()
-
     if tasks:
         cat = {}
         for task in tasks:
@@ -34,11 +36,6 @@ async def view_tasks(message: types.Message):
         await message.answer(response)
     else:
         await message.answer("У вас нет задач.")
-
-# Обработчик простого текстового сообщения
-@dp.message()
-async def text_message_handler(message: types.Message, state: FSMContext):
-    await message.answer("Неизвестная команда. Введите /help для получения списка команд.")
 
 # Отправка пользователю напоминания
 async def send_reminder(id: int, user_id: int, task_text: str, deadline: str, category: str, priority: int, alerts_sent: int):
@@ -97,6 +94,90 @@ async def reminder():
                                      
                     await db.execute('COMMIT')
         await asyncio.sleep(60)  # Проверка каждую минуту
+
+# Состояния создания задач для машины состояний
+class AddTaskStates(StatesGroup):
+    waiting_for_task_text = State()
+    waiting_for_deadline = State()
+    waiting_for_category = State()
+    waiting_for_priority = State()
+
+# Обработчик команды /add для начала добавления задачи
+@dp.message(Command("add"))
+async def add_task_start(message: types.Message, state: FSMContext):
+    await message.answer("Введите текст задачи.")
+    await state.set_state(AddTaskStates.waiting_for_task_text)
+
+# Получаем описание задачи
+@dp.message(AddTaskStates.waiting_for_task_text)
+async def process_task_text(message: types.Message, state: FSMContext):
+    await state.update_data(task_text=message.text)
+    await message.answer("Введите дедлайн задачи в формате YYYY-MM-DD HH:MM.")
+    await state.set_state(AddTaskStates.waiting_for_deadline)
+
+# Получаем дедлайн задачи
+@dp.message(AddTaskStates.waiting_for_deadline)
+async def process_deadline(message: types.Message, state: FSMContext):
+    try:
+        deadline = datetime.strptime(message.text, "%Y-%m-%d %H:%M")
+    except ValueError:
+        await message.answer("Неверный формат даты. Введите в формате YYYY-MM-DD HH:MM.")
+        return
+    await state.update_data(deadline=deadline)
+    await message.answer("Введите категорию задачи.")
+    await state.set_state(AddTaskStates.waiting_for_category)
+
+# Получаем категорию задачи
+@dp.message(AddTaskStates.waiting_for_category)
+async def process_category(message: types.Message, state: FSMContext):
+    await state.update_data(category=message.text)
+    await message.answer("Введите приоритет задачи (1-3).")
+    await state.set_state(AddTaskStates.waiting_for_priority)
+
+# Получаем приоритет задачи
+@dp.message(AddTaskStates.waiting_for_priority)
+async def process_priority(message: types.Message, state: FSMContext):
+    try:
+        priority = int(message.text)
+        if priority not in (1, 2, 3):
+            raise ValueError
+    except ValueError:
+        await message.answer("Приоритет должен быть числом от 1 до 3.")
+        return
+
+    await state.update_data(priority=priority)
+    data = await state.get_data()
+
+    # Определяем начальное значение alerts_sent
+    now = datetime.now()
+    time_diff = data['deadline'] - now
+    if time_diff > timedelta(hours=24):
+        alerts_sent = 0
+    elif time_diff > timedelta(hours=12):
+        alerts_sent = 1
+    elif time_diff > timedelta(hours=6):
+        alerts_sent = 2
+    elif time_diff > timedelta(hours=2):
+        alerts_sent = 3
+    elif time_diff > timedelta(minutes=30):
+        alerts_sent = 4
+    else:
+        alerts_sent = 5
+
+    # Вставка данных в базу
+    async with db_session() as db:
+        await db.execute('''INSERT INTO tasks (user_id, task_text, deadline, category, priority, alerts_sent, next_alert_at) 
+                            VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                            (message.from_user.id, data['task_text'], data['deadline'], data['category'], data['priority'], alerts_sent, data['deadline']))
+        await db.commit()
+
+    await message.answer("Задача добавлена!")
+    await state.clear()
+
+# Обработчик простого текстового сообщения
+@dp.message()
+async def text_message_handler(message: types.Message, state: FSMContext):
+    await message.answer("Неизвестная команда. Введите /help для получения списка команд.")
 
 async def main():
     await init_db()
