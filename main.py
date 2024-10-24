@@ -174,6 +174,48 @@ async def process_priority(message: types.Message, state: FSMContext):
     await message.answer("Задача добавлена!")
     await state.clear()
 
+# Состояния завершения задачи для машины состояний
+class CompleteTaskStates(StatesGroup):
+    waiting_for_task_id = State()
+
+@dp.message(Command("complete"))
+async def complete_task_start(message: types.Message, state: FSMContext):
+    # Получаем задачи из базы данных
+    async with db_session() as db:
+        async with db.execute('SELECT id, task_text, deadline FROM tasks WHERE user_id = ? ORDER BY deadline', (message.from_user.id,)) as cursor:
+            tasks = await cursor.fetchall()
+
+    # Проверяем, есть ли у пользователя задачи
+    if tasks:
+        response = "Выберите задачу для завершения, отправив её ID:\n"
+        for task in tasks:
+            response += f"- {task[1]} (ID: {task[0]}) | Дедлайн: {task[2]}\n"
+        await message.answer(response)
+        await state.set_state(CompleteTaskStates.waiting_for_task_id)
+    else:
+        await message.answer("У вас нет задач для завершения.")
+
+@dp.message(CompleteTaskStates.waiting_for_task_id)
+async def process_task_id(message: types.Message, state: FSMContext):
+    try:
+        task_id = int(message.text)
+    except ValueError:
+        await message.answer("Пожалуйста, введите корректный ID задачи.")
+        return
+
+    # Удаление задачи из базы данных
+    async with db_session() as db:
+        async with db.execute('DELETE FROM tasks WHERE id = ? AND user_id = ?', (task_id, message.from_user.id)) as cursor:
+            if cursor.rowcount == 0:  # Если строка не была найдена
+                await message.answer("Задача с таким ID не найдена. Проверьте ID и попробуйте снова.")
+                return
+
+        await db.commit()
+
+    await message.answer(f"Задача с ID {task_id} успешно завершена.")
+    await state.clear()
+
+
 # Обработчик простого текстового сообщения
 @dp.message()
 async def text_message_handler(message: types.Message, state: FSMContext):
