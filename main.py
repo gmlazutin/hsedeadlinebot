@@ -32,6 +32,16 @@ async def help_command(message: types.Message):
     msgs = lang_ru()
     await message.answer(msgs["helptext"])
 
+# Команда /cancel
+@dp.message(Command("cancel"))
+async def help_command(message: types.Message, state: FSMContext):
+    msgs = lang_ru()
+    if await state.get_state() != None:
+        await message.answer(msgs["canceled"])
+    else:
+        await message.answer(msgs["cancelerror"])
+    await state.clear()
+
 # Просмотр задач по категориям
 @dp.message(Command("tasks"))
 async def view_tasks(message: types.Message):
