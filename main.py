@@ -47,6 +47,29 @@ async def help_command(message: types.Message, state: FSMContext):
         await message.answer(msgs["cancelerror"])
     await state.clear()
 
+# Команда /stats
+@dp.message(Command("stats"))
+async def stats_command(message: types.Message):
+    msgs = lang_ru()
+    count_week_all = 0
+    count_week_completed = 0
+    count_month_all = 0
+    count_month_completed = 0
+    async with db_session() as db:
+        async with db.execute('SELECT deadline, completed FROM stats WHERE user_id = ? AND deadline >= ?', (message.from_user.id,datetime.now() - timedelta(weeks=4))) as cursor:
+            tasks = await cursor.fetchall()
+            for task in tasks:
+                deadline, completed = task
+                if completed == 1:
+                    count_month_completed += 1
+                count_month_all += 1
+                if datetime.now() - datetime.fromisoformat(deadline) <= timedelta(weeks=1):
+                        count_week_all += 1
+                        if completed == 1:
+                            count_week_completed += 1
+
+    await message.answer(msgs["stats"] % (count_week_all, count_week_completed, count_month_all, count_month_completed))
+
 # Просмотр задач по категориям
 @dp.message(Command("tasks"))
 async def view_tasks(message: types.Message):
@@ -126,9 +149,14 @@ async def reminder():
                                             SET alerts_sent = alerts_sent + 1
                                             WHERE alerts_sent < 6 AND id = ?''', (id,))
 
+                    await db.execute('''INSERT INTO stats (id, user_id, deadline, created_at)
+                                            SELECT id, user_id, deadline, created_at FROM tasks
+                                            WHERE alerts_sent = 6 AND id = ?''', (id,))
+
                     await db.execute('DELETE FROM tasks WHERE alerts_sent = 6 AND id = ?', (id,))
-                                     
+                    
                     await db.execute('COMMIT')
+                await db.commit()
         await asyncio.sleep(60)  # Проверка каждую минуту
 
 # Состояния создания задач для машины состояний
@@ -159,6 +187,8 @@ async def process_deadline(message: types.Message, state: FSMContext):
     msgs = lang_ru()
     try:
         deadline = datetime.strptime(message.text, "%d.%m.%Y %H:%M")
+        if deadline < datetime.now():
+            raise ValueError
     except ValueError:
         await message.answer(msgs["enterdeadlineerror"])
         return
@@ -213,9 +243,9 @@ async def process_priority(message: types.Message, state: FSMContext):
 
     # Вставка данных в базу
     async with db_session() as db:
-        await db.execute('''INSERT INTO tasks (user_id, task_text, deadline, category, priority, alerts_sent, next_alert_at) 
-                            VALUES (?, ?, ?, ?, ?, ?, ?)''',
-                            (message.from_user.id, data['task_text'], data['deadline'], data['category'], data['priority'], alerts_sent, next))
+        await db.execute('''INSERT INTO tasks (user_id, task_text, deadline, category, priority, alerts_sent, next_alert_at, created_at) 
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                            (message.from_user.id, data['task_text'], data['deadline'], data['category'], data['priority'], alerts_sent, next, now))
         await db.commit()
 
     await message.answer(msgs["taskadded"])
@@ -242,13 +272,18 @@ async def process_task_id(message: types.Message, state: FSMContext):
 
     # Удаление задачи из базы данных
     async with db_session() as db:
+        await db.execute("BEGIN TRANSACTION")
+        await db.execute('''INSERT INTO stats (id, user_id, deadline, created_at, completed)
+                SELECT id, user_id, deadline, created_at, 1 FROM tasks
+                WHERE id = ? AND user_id = ?''', (task_id, message.from_user.id))
         async with db.execute('DELETE FROM tasks WHERE id = ? AND user_id = ?', (task_id, message.from_user.id)) as cursor:
-            if cursor.rowcount == 0:  # Если строка не была найдена
-                await message.answer(msgs["taskbyidnotfound"])
-                return
-
+            rowcnt = cursor.rowcount
+        await db.execute("COMMIT")
         await db.commit()
-
+    
+    if rowcnt == 0:  # Если строка не была найдена
+        await message.answer(msgs["taskbyidnotfound"])
+        return
     await message.answer(msgs["taskcompleted"])
     await state.clear()
 
