@@ -20,8 +20,6 @@ dp = Dispatcher()
 
 def lang_ru():
     return l10n("ru")
-    # В данный момент поддерживается только ru локализация
-    # Но при желании можно добавить и другие языки.
 
 #Генерирует текстовое описание приоритета исходя из его численного значения
 def priority_gen(lang: dict[str, str], pri: int) -> str:
@@ -99,10 +97,11 @@ async def send_reminder(id: int, user_id: int, task_text: str, deadline: str, ca
     await bot.send_message(user_id, text)
 
 
-async def remind():
-    async with db_session() as db:
-        try:
-            now = datetime.now()
+# Напоминание о задачах
+async def reminder():
+    while True:
+        now = datetime.now()
+        async with db_session() as db:
             async with db.execute('SELECT id, user_id, task_text, deadline, category, priority, alerts_sent FROM tasks WHERE next_alert_at <= ?', (now,)) as cursor:
                 tasks = await cursor.fetchall()
                 for task in tasks:
@@ -110,6 +109,8 @@ async def remind():
                     await send_reminder(id, user_id, task_text, deadline, category, priority, alerts_sent)
                     # Создаём транзакцию для инкремента кол-ва посланных алертов
                     # Далее идёт неочевидный SQL-запрос, если непонятно как он работает - пишите мне.
+                    await db.execute('BEGIN TRANSACTION')
+
                     await db.execute('''UPDATE tasks 
                                             SET next_alert_at = DATETIME (deadline,
                                                 CASE
@@ -120,24 +121,14 @@ async def remind():
                                                     WHEN alerts_sent+1 = 5 THEN '+0 seconds'
                                                 END)
                                             WHERE alerts_sent < 6 AND id = ?''', (id,))
-                                                
+                                        
                     await db.execute('''UPDATE tasks
                                             SET alerts_sent = alerts_sent + 1
                                             WHERE alerts_sent < 6 AND id = ?''', (id,))
-                            
-                    await db.execute('''INSERT INTO stats (id, user_id, deadline, created_at)
-                                            SELECT id, user_id, deadline, created_at FROM tasks
-                                            WHERE alerts_sent = 6 AND id = ?''', (id,))
 
                     await db.execute('DELETE FROM tasks WHERE alerts_sent = 6 AND id = ?', (id,))
-        except Exception as e:
-            print(f"remind loop exception: {e}")
-
-
-# Напоминание о задачах
-async def reminder():
-    while True:
-        remind()
+                                     
+                    await db.execute('COMMIT')
         await asyncio.sleep(60)  # Проверка каждую минуту
 
 # Состояния создания задач для машины состояний
@@ -222,9 +213,10 @@ async def process_priority(message: types.Message, state: FSMContext):
 
     # Вставка данных в базу
     async with db_session() as db:
-        await db.execute('''INSERT INTO tasks (user_id, task_text, deadline, category, priority, alerts_sent, next_alert_at, created_at) 
+        await db.execute('''INSERT INTO tasks (user_id, task_text, deadline, category, priority, alerts_sent, next_alert_at) 
                             VALUES (?, ?, ?, ?, ?, ?, ?)''',
-                            (message.from_user.id, data['task_text'], data['deadline'], data['category'], data['priority'], alerts_sent, next, now))
+                            (message.from_user.id, data['task_text'], data['deadline'], data['category'], data['priority'], alerts_sent, next))
+        await db.commit()
 
     await message.answer(msgs["taskadded"])
     await state.clear()
@@ -250,13 +242,13 @@ async def process_task_id(message: types.Message, state: FSMContext):
 
     # Удаление задачи из базы данных
     async with db_session() as db:
-        await db.execute('''INSERT INTO stats (id, user_id, deadline, created_at, completed)
-                                SELECT id, user_id, deadline, created_at, 1 FROM tasks
-                                WHERE alerts_sent = 6 AND id = ?''', (id,))
-        cursor = await db.execute('DELETE FROM tasks WHERE id = ? AND user_id = ?', (task_id, message.from_user.id))
-        if cursor.rowcount == 0:  # Если строка не была найдена
-            await message.answer(msgs["taskbyidnotfound"])
-            return
+        async with db.execute('DELETE FROM tasks WHERE id = ? AND user_id = ?', (task_id, message.from_user.id)) as cursor:
+            if cursor.rowcount == 0:  # Если строка не была найдена
+                await message.answer(msgs["taskbyidnotfound"])
+                return
+
+        await db.commit()
+
     await message.answer(msgs["taskcompleted"])
     await state.clear()
 
