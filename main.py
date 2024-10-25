@@ -8,10 +8,23 @@ from datetime import datetime, timedelta
 from aiogram.fsm.state import StatesGroup, State
 
 from db import init_db, db_session
-from messages import priority_gen
+from messages import l10n
 
 bot = Bot(token=sys.argv[1])
 dp = Dispatcher()
+
+def lang_ru():
+    return l10n("ru")
+
+#Генерирует текстовое описание приоритета исходя из его численного значения
+def priority_gen(lang: dict[str, str], pri: int) -> str:
+    if pri == 1:
+        return lang["prilow"]
+    if pri == 2:
+        return lang["primedium"]
+    if pri == 3:
+        return lang["prihigh"]
+    return lang["unknown"]
 
 # Просмотр задач по категориям
 @dp.message(Command("tasks"))
@@ -20,6 +33,7 @@ async def view_tasks(message: types.Message):
         async with db.execute('SELECT id, task_text, deadline, category, priority FROM tasks WHERE user_id = ? ORDER BY deadline', (message.from_user.id,)) as cursor:
             tasks = await cursor.fetchall()
     if tasks:
+        msgs = lang_ru()
         cat = {}
         for task in tasks:
             category = str(task[3])
@@ -28,35 +42,36 @@ async def view_tasks(message: types.Message):
             cat[category].append([task[0], task[1], task[2], task[4]])
         response = ""
         for c in cat:
-            response += f"Категория \"{c}\":\n"
+            response += msgs["viewtaskscat"] % (c) + "\n"
             for t in cat[c]:
                 #todo (issue #2): нормальное форматирование даты
-                response += f"- Задача: {t[1]} (ID: {t[0]})\n  Дедлайн: {t[2]}\n  Приоритет: {priority_gen(t[3])} ({t[3]})\n"
+                response += msgs["viewtaskstask"] % (t[1], t[0], t[2], priority_gen(msgs, t[3]), t[3]) + "\n"
             response += "\n"
         await message.answer(response)
     else:
-        await message.answer("У вас нет задач.")
+        await message.answer(msgs["viewtasksempty"])
 
 # Отправка пользователю напоминания
 async def send_reminder(id: int, user_id: int, task_text: str, deadline: str, category: str, priority: int, alerts_sent: int):
     pl = ""
+    msgs = lang_ru()
     if alerts_sent == 0:
-        pl = "менее 24 часов"
+        pl = msgs["24hourless"]
     elif alerts_sent == 1:
-        pl = "менее 12 часов"
+        pl = msgs["12hourless"]
     elif alerts_sent == 2:
-        pl = "менее 6 часов"
+        pl = msgs["6hourless"]
     elif alerts_sent == 3:
-        pl = "менее 2 часов"
+        pl = msgs["2hourless"]
     elif alerts_sent == 4:
-        pl = "менее 30 минут"
+        pl = msgs["30minless"]
     
-    text = f"\nДедлайн: {deadline}\nПриоритет: {priority_gen(priority)} ({priority})\nКатегория: {category}"
+    text = msgs["remindertask"] % (deadline, priority_gen(priority), priority, category)
 
     if alerts_sent < 5:
-        text = f"До завершения дедлайна по задаче \"{task_text}\" (ID: {id}) осталось: {pl}!\n\n"+text
+        text = msgs["remindertoend"] % (task_text, id, pl)+"\n\n"+text
     else:
-        text = f"Задача \"{task_text}\" (ID: {id}) истекла!!!\n\n"+text
+        text = msgs["reminderexpired"] % (task_text, id)+"\n\n"+text
     
     await bot.send_message(user_id, text)
 
@@ -105,44 +120,49 @@ class AddTaskStates(StatesGroup):
 # Обработчик команды /add для начала добавления задачи
 @dp.message(Command("add"))
 async def add_task_start(message: types.Message, state: FSMContext):
-    await message.answer("Введите текст задачи.")
+    msgs = lang_ru()
+    await message.answer(msgs["entertasktext"])
     await state.set_state(AddTaskStates.waiting_for_task_text)
 
 # Получаем описание задачи
 @dp.message(AddTaskStates.waiting_for_task_text)
 async def process_task_text(message: types.Message, state: FSMContext):
     await state.update_data(task_text=message.text)
-    await message.answer("Введите дедлайн задачи в формате YYYY-MM-DD HH:MM.")
+    msgs = lang_ru()
+    await message.answer(msgs["enterdeadline"])
     await state.set_state(AddTaskStates.waiting_for_deadline)
 
 # Получаем дедлайн задачи
 @dp.message(AddTaskStates.waiting_for_deadline)
 async def process_deadline(message: types.Message, state: FSMContext):
+    msgs = lang_ru()
     try:
         deadline = datetime.strptime(message.text, "%Y-%m-%d %H:%M")
     except ValueError:
-        await message.answer("Неверный формат даты. Введите в формате YYYY-MM-DD HH:MM.")
+        await message.answer(msgs["enterdeadlineerror"])
         return
     await state.update_data(deadline=deadline)
-    await message.answer("Введите категорию задачи.")
+    await message.answer(msgs["entertaskcat"])
     await state.set_state(AddTaskStates.waiting_for_category)
 
 # Получаем категорию задачи
 @dp.message(AddTaskStates.waiting_for_category)
 async def process_category(message: types.Message, state: FSMContext):
     await state.update_data(category=message.text)
-    await message.answer("Введите приоритет задачи (1-3).")
+    msgs = lang_ru()
+    await message.answer(msgs["entertaskpri"])
     await state.set_state(AddTaskStates.waiting_for_priority)
 
 # Получаем приоритет задачи
 @dp.message(AddTaskStates.waiting_for_priority)
 async def process_priority(message: types.Message, state: FSMContext):
+    msgs = lang_ru()
     try:
         priority = int(message.text)
         if priority not in (1, 2, 3):
             raise ValueError
     except ValueError:
-        await message.answer("Приоритет должен быть числом от 1 до 3.")
+        await message.answer(msgs["entertaskprierror"])
         return
 
     await state.update_data(priority=priority)
@@ -171,7 +191,7 @@ async def process_priority(message: types.Message, state: FSMContext):
                             (message.from_user.id, data['task_text'], data['deadline'], data['category'], data['priority'], alerts_sent, data['deadline']))
         await db.commit()
 
-    await message.answer("Задача добавлена!")
+    await message.answer(msgs["taskadded"])
     await state.clear()
 
 # Состояния завершения задачи для машины состояний
@@ -180,46 +200,37 @@ class CompleteTaskStates(StatesGroup):
 
 @dp.message(Command("complete"))
 async def complete_task_start(message: types.Message, state: FSMContext):
-    # Получаем задачи из базы данных
-    async with db_session() as db:
-        async with db.execute('SELECT id, task_text, deadline FROM tasks WHERE user_id = ? ORDER BY deadline', (message.from_user.id,)) as cursor:
-            tasks = await cursor.fetchall()
-
-    # Проверяем, есть ли у пользователя задачи
-    if tasks:
-        response = "Выберите задачу для завершения, отправив её ID:\n"
-        for task in tasks:
-            response += f"- {task[1]} (ID: {task[0]}) | Дедлайн: {task[2]}\n"
-        await message.answer(response)
-        await state.set_state(CompleteTaskStates.waiting_for_task_id)
-    else:
-        await message.answer("У вас нет задач для завершения.")
+    msgs = lang_ru()
+    await message.answer(msgs["entercompletetaskid"])
+    await state.set_state(CompleteTaskStates.waiting_for_task_id)
 
 @dp.message(CompleteTaskStates.waiting_for_task_id)
 async def process_task_id(message: types.Message, state: FSMContext):
+    msgs = lang_ru()
     try:
         task_id = int(message.text)
     except ValueError:
-        await message.answer("Пожалуйста, введите корректный ID задачи.")
+        await message.answer(msgs["entercompletetaskiderror"])
         return
 
     # Удаление задачи из базы данных
     async with db_session() as db:
         async with db.execute('DELETE FROM tasks WHERE id = ? AND user_id = ?', (task_id, message.from_user.id)) as cursor:
             if cursor.rowcount == 0:  # Если строка не была найдена
-                await message.answer("Задача с таким ID не найдена. Проверьте ID и попробуйте снова.")
+                await message.answer(msgs["taskbyidnotfound"])
                 return
 
         await db.commit()
 
-    await message.answer(f"Задача с ID {task_id} успешно завершена.")
+    await message.answer(msgs["taskcompleted"])
     await state.clear()
 
 
 # Обработчик простого текстового сообщения
 @dp.message()
 async def text_message_handler(message: types.Message, state: FSMContext):
-    await message.answer("Неизвестная команда. Введите /help для получения списка команд.")
+    msgs = lang_ru()
+    await message.answer(msgs["unknownmsg"])
 
 async def main():
     await init_db()
