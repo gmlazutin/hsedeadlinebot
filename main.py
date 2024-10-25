@@ -3,6 +3,7 @@ import sys
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
+from datetime import datetime, timedelta
 from db import init_db, db_session
 from messages import priority_gen
 
@@ -39,8 +40,67 @@ async def view_tasks(message: types.Message):
 async def text_message_handler(message: types.Message, state: FSMContext):
     await message.answer("Неизвестная команда. Введите /help для получения списка команд.")
 
+# Отправка пользователю напоминания
+async def send_reminder(id: int, user_id: int, task_text: str, deadline: str, category: str, priority: int, alerts_sent: int):
+    pl = ""
+    if alerts_sent == 0:
+        pl = "менее 24 часов"
+    elif alerts_sent == 1:
+        pl = "менее 12 часов"
+    elif alerts_sent == 2:
+        pl = "менее 6 часов"
+    elif alerts_sent == 3:
+        pl = "менее 2 часов"
+    elif alerts_sent == 4:
+        pl = "менее 30 минут"
+    
+    text = f"\nДедлайн: {deadline}\nПриоритет: {priority_gen(priority)} ({priority})\nКатегория: {category}"
+
+    if alerts_sent < 5:
+        text = f"До завершения дедлайна по задаче \"{task_text}\" (ID: {id}) осталось: {pl}!\n\n"+text
+    else:
+        text = f"Задача \"{task_text}\" (ID: {id}) истекла!!!\n\n"+text
+    
+    await bot.send_message(user_id, text)
+
+
+# Напоминание о задачах
+async def reminder():
+    while True:
+        now = datetime.now()
+        async with db_session() as db:
+            async with db.execute('SELECT id, user_id, task_text, deadline, category, priority, alerts_sent FROM tasks WHERE next_alert_at <= ?', (now,)) as cursor:
+                tasks = await cursor.fetchall()
+                for task in tasks:
+                    id, user_id, task_text, deadline, category, priority, alerts_sent = task
+                    await send_reminder(id, user_id, task_text, deadline, category, priority, alerts_sent)
+                    # Создаём транзакцию для инкремента кол-ва посланных алертов
+                    # Далее идёт неочевидный SQL-запрос, если непонятно как он работает - пишите мне.
+                    await db.execute('BEGIN TRANSACTION')
+
+                    await db.execute('''UPDATE tasks 
+                                            SET next_alert_at = DATETIME (deadline,
+                                                CASE
+                                                    WHEN alerts_sent+1 = 1 THEN '-12 hours'
+                                                    WHEN alerts_sent+1 = 2 THEN '-6 hours'
+                                                    WHEN alerts_sent+1 = 3 THEN '-2 hours'
+                                                    WHEN alerts_sent+1 = 4 THEN '-30 minutes'
+                                                    WHEN alerts_sent+1 = 5 THEN '+0 seconds'
+                                                END)
+                                            WHERE alerts_sent < 6 AND id = ?''', (id,))
+                                        
+                    await db.execute('''UPDATE tasks
+                                            SET alerts_sent = alerts_sent + 1
+                                            WHERE alerts_sent < 6 AND id = ?''', (id,))
+
+                    await db.execute('DELETE FROM tasks WHERE alerts_sent = 6 AND id = ?', (id,))
+                                     
+                    await db.execute('COMMIT')
+        await asyncio.sleep(60)  # Проверка каждую минуту
+
 async def main():
     await init_db()
+    asyncio.create_task(reminder())
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
