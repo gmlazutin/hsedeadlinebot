@@ -49,19 +49,21 @@ async def help_command(message: types.Message, state: FSMContext):
 
 # Команда /stats
 @dp.message(Command("stats"))
-async def help_command(message: types.Message):
+async def stats_command(message: types.Message):
     msgs = lang_ru()
-    count_week_all, count_week_completed = 0
-    count_month_all, count_month_completed = 0
+    count_week_all = 0
+    count_week_completed = 0
+    count_month_all = 0
+    count_month_completed = 0
     async with db_session() as db:
-        async with db.execute('SELECT deadline, completed FROM tasks WHERE user_id = ? AND deadline >= ?', (message.from_user.id,datetime.now() - timedelta(weeks=4))) as cursor:
+        async with db.execute('SELECT deadline, completed FROM stats WHERE user_id = ? AND deadline >= ?', (message.from_user.id,datetime.now() - timedelta(weeks=4))) as cursor:
             tasks = await cursor.fetchall()
             for task in tasks:
                 deadline, completed = task
                 if completed == 1:
                     count_month_completed += 1
                 count_month_all += 1
-                if datetime.now() - deadline <= timedelta(weeks=1):
+                if datetime.now() - datetime.fromisoformat(deadline) <= timedelta(weeks=1):
                         count_week_all += 1
                         if completed == 1:
                             count_week_completed += 1
@@ -185,6 +187,8 @@ async def process_deadline(message: types.Message, state: FSMContext):
     msgs = lang_ru()
     try:
         deadline = datetime.strptime(message.text, "%d.%m.%Y %H:%M")
+        if deadline < datetime.now():
+            raise ValueError
     except ValueError:
         await message.answer(msgs["enterdeadlineerror"])
         return
