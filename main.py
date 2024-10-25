@@ -173,22 +173,28 @@ async def process_priority(message: types.Message, state: FSMContext):
     time_diff = data['deadline'] - now
     if time_diff > timedelta(hours=24):
         alerts_sent = 0
+        next = data['deadline'] - timedelta(hours=24)
     elif time_diff > timedelta(hours=12):
         alerts_sent = 1
+        next = data['deadline'] - timedelta(hours=12)
     elif time_diff > timedelta(hours=6):
         alerts_sent = 2
+        next = data['deadline'] - timedelta(hours=6)
     elif time_diff > timedelta(hours=2):
         alerts_sent = 3
+        next = data['deadline'] - timedelta(hours=2)
     elif time_diff > timedelta(minutes=30):
         alerts_sent = 4
+        next = data['deadline'] - timedelta(minutes=30)
     else:
         alerts_sent = 5
+        next = data['deadline']
 
     # Вставка данных в базу
     async with db_session() as db:
         await db.execute('''INSERT INTO tasks (user_id, task_text, deadline, category, priority, alerts_sent, next_alert_at) 
                             VALUES (?, ?, ?, ?, ?, ?, ?)''',
-                            (message.from_user.id, data['task_text'], data['deadline'], data['category'], data['priority'], alerts_sent, data['deadline']))
+                            (message.from_user.id, data['task_text'], data['deadline'], data['category'], data['priority'], alerts_sent, next))
         await db.commit()
 
     await message.answer(msgs["taskadded"])
