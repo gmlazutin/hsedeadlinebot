@@ -26,6 +26,12 @@ def priority_gen(lang: dict[str, str], pri: int) -> str:
         return lang["prihigh"]
     return lang["unknown"]
 
+# Команда /help
+@dp.message(Command("help"))
+async def help_command(message: types.Message):
+    msgs = lang_ru()
+    await message.answer(msgs["helptext"])
+
 # Просмотр задач по категориям
 @dp.message(Command("tasks"))
 async def view_tasks(message: types.Message):
