@@ -47,6 +47,27 @@ async def help_command(message: types.Message, state: FSMContext):
         await message.answer(msgs["cancelerror"])
     await state.clear()
 
+# Команда /stats
+@dp.message(Command("stats"))
+async def help_command(message: types.Message):
+    msgs = lang_ru()
+    count_week_all, count_week_completed = 0
+    count_month_all, count_month_completed = 0
+    async with db_session() as db:
+        async with db.execute('SELECT deadline, completed FROM tasks WHERE user_id = ? AND deadline >= ?', (message.from_user.id,datetime.now() - timedelta(weeks=4))) as cursor:
+            tasks = await cursor.fetchall()
+            for task in tasks:
+                deadline, completed = task
+                if completed == 1:
+                    count_month_completed += 1
+                count_month_all += 1
+                if datetime.now() - deadline <= timedelta(weeks=1):
+                        count_week_all += 1
+                        if completed == 1:
+                            count_week_completed += 1
+
+    await message.answer(msgs["stats"] % (count_week_all, count_week_completed, count_month_all, count_month_completed))
+
 # Просмотр задач по категориям
 @dp.message(Command("tasks"))
 async def view_tasks(message: types.Message):
