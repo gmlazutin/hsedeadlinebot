@@ -6,6 +6,7 @@ from aiogram.fsm.context import FSMContext
 from datetime import datetime, timedelta
 
 from aiogram.fsm.state import StatesGroup, State
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from db import init_db, db_session
 from messages import priority_gen
@@ -221,6 +222,20 @@ async def process_task_id(message: types.Message, state: FSMContext):
     await message.answer(f"Задача с ID {task_id} успешно завершена.")
     await state.clear()
 
+@dp.message(Command("statistic"))
+async def view_statistics(message: types.Message):
+    async with db_session() as db:
+        async with db.execute("SELECT task_text, completed_at FROM completed_tasks WHERE user_id = ?", (message.from_user.id,)) as cursor:
+            completed_tasks = await cursor.fetchall()
+
+    if completed_tasks:
+        response = "Завершенные задачи:\n\n"
+        for task_text, completed_at in completed_tasks:
+            response += f"- {task_text} (Завершено: {completed_at})\n"
+    else:
+        response = "У вас пока нет завершенных задач."
+
+    await message.answer(response)
 
 
 # Обработчик простого текстового сообщения
