@@ -123,40 +123,46 @@ async def send_reminder(id: int, user_id: int, task_text: str, deadline: str, ca
 # Напоминание о задачах
 async def reminder():
     while True:
-        now = datetime.now()
-        async with db_session() as db:
-            async with db.execute('SELECT id, user_id, task_text, deadline, category, priority, alerts_sent FROM tasks WHERE next_alert_at <= ?', (now,)) as cursor:
-                tasks = await cursor.fetchall()
-                for task in tasks:
-                    id, user_id, task_text, deadline, category, priority, alerts_sent = task
-                    await send_reminder(id, user_id, task_text, deadline, category, priority, alerts_sent)
-                    # Создаём транзакцию для инкремента кол-ва посланных алертов
-                    # Далее идёт неочевидный SQL-запрос, если непонятно как он работает - пишите мне.
-                    await db.execute('BEGIN TRANSACTION')
+        try:
+            now = datetime.now()
+            async with db_session() as db:
+                async with db.execute('SELECT id, user_id, task_text, deadline, category, priority, alerts_sent FROM tasks WHERE next_alert_at <= ?', (now,)) as cursor:
+                    tasks = await cursor.fetchall()
+                    for task in tasks:
+                        id, user_id, task_text, deadline, category, priority, alerts_sent = task
+                        await send_reminder(id, user_id, task_text, deadline, category, priority, alerts_sent)
+                        # Создаём транзакцию для инкремента кол-ва посланных алертов
+                        # Далее идёт неочевидный SQL-запрос, если непонятно как он работает - пишите мне.
+                        await db.execute('BEGIN TRANSACTION')
+                        try:
+                            await db.execute('''UPDATE tasks 
+                                                    SET next_alert_at = DATETIME (deadline,
+                                                        CASE
+                                                            WHEN alerts_sent+1 = 1 THEN '-12 hours'
+                                                            WHEN alerts_sent+1 = 2 THEN '-6 hours'
+                                                            WHEN alerts_sent+1 = 3 THEN '-2 hours'
+                                                            WHEN alerts_sent+1 = 4 THEN '-30 minutes'
+                                                            WHEN alerts_sent+1 = 5 THEN '+0 seconds'
+                                                        END)
+                                                    WHERE alerts_sent < 6 AND id = ?''', (id,))
+                                                
+                            await db.execute('''UPDATE tasks
+                                                    SET alerts_sent = alerts_sent + 1
+                                                    WHERE alerts_sent < 6 AND id = ?''', (id,))
 
-                    await db.execute('''UPDATE tasks 
-                                            SET next_alert_at = DATETIME (deadline,
-                                                CASE
-                                                    WHEN alerts_sent+1 = 1 THEN '-12 hours'
-                                                    WHEN alerts_sent+1 = 2 THEN '-6 hours'
-                                                    WHEN alerts_sent+1 = 3 THEN '-2 hours'
-                                                    WHEN alerts_sent+1 = 4 THEN '-30 minutes'
-                                                    WHEN alerts_sent+1 = 5 THEN '+0 seconds'
-                                                END)
-                                            WHERE alerts_sent < 6 AND id = ?''', (id,))
-                                        
-                    await db.execute('''UPDATE tasks
-                                            SET alerts_sent = alerts_sent + 1
-                                            WHERE alerts_sent < 6 AND id = ?''', (id,))
+                            await db.execute('''INSERT INTO stats (id, user_id, deadline, created_at)
+                                                    SELECT id, user_id, deadline, created_at FROM tasks
+                                                    WHERE alerts_sent = 6 AND id = ?''', (id,))
 
-                    await db.execute('''INSERT INTO stats (id, user_id, deadline, created_at)
-                                            SELECT id, user_id, deadline, created_at FROM tasks
-                                            WHERE alerts_sent = 6 AND id = ?''', (id,))
-
-                    await db.execute('DELETE FROM tasks WHERE alerts_sent = 6 AND id = ?', (id,))
-                    
-                    await db.execute('COMMIT')
-                await db.commit()
+                            await db.execute('DELETE FROM tasks WHERE alerts_sent = 6 AND id = ?', (id,))
+                            
+                            await db.execute('COMMIT')
+                        except Exception as e:
+                            db.execute('ROLLBACK')
+                            print(f"error occured while reminder transaction, rollback...: {e}")
+                    await db.commit()
+        except Exception as e:
+            print(f"error occured in reminder loop: {e}")
         await asyncio.sleep(60)  # Проверка каждую минуту
 
 # Состояния создания задач для машины состояний
