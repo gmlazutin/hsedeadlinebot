@@ -32,8 +32,8 @@ async def view_tasks(message: types.Message):
     async with db_session() as db:
         async with db.execute('SELECT id, task_text, deadline, category, priority FROM tasks WHERE user_id = ? ORDER BY deadline', (message.from_user.id,)) as cursor:
             tasks = await cursor.fetchall()
+    msgs = lang_ru()
     if tasks:
-        msgs = lang_ru()
         cat = {}
         for task in tasks:
             category = str(task[3])
