@@ -17,6 +17,13 @@ async def init_db():
                                 alerts_sent INTEGER DEFAULT 0,
                                 next_alert_at DATETIME
                             )''')
+        # Создаем таблицу выполненных задач
+        await db.execute('''CREATE TABLE IF NOT EXISTS completed_tasks (
+                                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                        user_id INTEGER NOT NULL,
+                                        task_text TEXT,
+                                        completed_at DATETIME NOT NULL
+                                    )''')
         await db.commit()
 
 #Таблица tasks:

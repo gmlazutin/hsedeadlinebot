@@ -203,17 +203,24 @@ async def process_task_id(message: types.Message, state: FSMContext):
         await message.answer("Пожалуйста, введите корректный ID задачи.")
         return
 
-    # Удаление задачи из базы данных
     async with db_session() as db:
-        async with db.execute('DELETE FROM tasks WHERE id = ? AND user_id = ?', (task_id, message.from_user.id)) as cursor:
-            if cursor.rowcount == 0:  # Если строка не была найдена
-                await message.answer("Задача с таким ID не найдена. Проверьте ID и попробуйте снова.")
-                return
+        # Получаем информацию о задаче перед ее удалением
+        async with db.execute('SELECT task_text FROM tasks WHERE id = ? AND user_id = ?', (task_id, message.from_user.id)) as cursor:
+            task = await cursor.fetchone()
 
+        if task is None:
+            await message.answer("Задача с таким ID не найдена. Проверьте ID и попробуйте снова.")
+            return
+
+        # Перенос задачи в таблицу выполненных
+        await db.execute('INSERT INTO completed_tasks (user_id, task_text, completed_at) VALUES (?, ?, ?)',
+                         (message.from_user.id, task[0], datetime.now()))
+        await db.execute('DELETE FROM tasks WHERE id = ? AND user_id = ?', (task_id, message.from_user.id))
         await db.commit()
 
     await message.answer(f"Задача с ID {task_id} успешно завершена.")
     await state.clear()
+
 
 
 # Обработчик простого текстового сообщения
