@@ -1,8 +1,9 @@
 import aiosqlite
 
 # Создание сеанса доступа к бд
-def db_session():
-    return aiosqlite.connect('main.db')
+async def db_session():
+    async with aiosqlite.connect('main.db') as db:
+        yield db
 
 # Инициализация базы данных
 async def init_db():
@@ -15,8 +16,16 @@ async def init_db():
                                 category TEXT,
                                 priority INTEGER DEFAULT 1,
                                 alerts_sent INTEGER DEFAULT 0,
-                                next_alert_at DATETIME
+                                next_alert_at DATETIME NOT NULL,
+                                created_at DATETIME NOT NULL,
                             )''')
+        await db.execute('''CREATE TABLE IF NOT EXISTS stats (
+                                id INTEGER PRIMARY KEY,
+                                user_id INTEGER NOT NULL,
+                                deadline DATETIME NOT NULL,
+                                completed INTEGER DEFAULT 0,
+                                created_at DATETIME NOT NULL,
+                         )''')
         await db.commit()
 
 #Таблица tasks:
