@@ -66,7 +66,7 @@ async def send_reminder(id: int, user_id: int, task_text: str, deadline: str, ca
     elif alerts_sent == 4:
         pl = msgs["30minless"]
     
-    text = msgs["remindertask"] % (deadline, priority_gen(priority), priority, category)
+    text = msgs["remindertask"] % (deadline, priority_gen(msgs, priority), priority, category)
 
     if alerts_sent < 5:
         text = msgs["remindertoend"] % (task_text, id, pl)+"\n\n"+text
@@ -137,7 +137,7 @@ async def process_task_text(message: types.Message, state: FSMContext):
 async def process_deadline(message: types.Message, state: FSMContext):
     msgs = lang_ru()
     try:
-        deadline = datetime.strptime(message.text, "%Y-%m-%d %H:%M")
+        deadline = datetime.strptime(message.text, "%d.%m.%Y %H:%M")
     except ValueError:
         await message.answer(msgs["enterdeadlineerror"])
         return
