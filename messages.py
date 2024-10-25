@@ -2,7 +2,7 @@ messages_ru = {
     "prilow": "Низкий",
     "primedium": "Средний",
     "prihigh": "Высокий",
-    "unknown": "<Неизвестно>",
+    "unknown": "(Неизвестно)",
     "viewtaskscat": "Категория \"%s\":",
     "viewtaskstask": "- Задача: %s (ID: %d)\n  Дедлайн: %s\n  Приоритет: %s (%d)",
     "viewtasksempty": "У вас нет задач.",

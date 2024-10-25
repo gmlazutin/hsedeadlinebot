@@ -2,6 +2,8 @@ import asyncio
 import sys
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums.parse_mode import ParseMode
 from aiogram.fsm.context import FSMContext
 from datetime import datetime, timedelta
 
@@ -10,7 +12,10 @@ from aiogram.fsm.state import StatesGroup, State
 from db import init_db, db_session
 from messages import l10n
 
-bot = Bot(token=sys.argv[1])
+bot = Bot(token=sys.argv[1], 
+    default=DefaultBotProperties(
+        parse_mode=ParseMode.HTML,
+))
 dp = Dispatcher()
 
 def lang_ru():
